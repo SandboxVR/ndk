@@ -940,7 +940,7 @@ impl AudioStream {
     /// Returns the policy that determines whether the audio may or
     /// may not be captured by other apps or the system.
     #[cfg(feature = "api-level-29")]
-    pub fn get_allowed_capture_policy(self) -> Result<AudioAllowedCapturePolicy> {
+    pub fn get_allowed_capture_policy(&self) -> Result<AudioAllowedCapturePolicy> {
         enum_return_value(unsafe { ffi::AAudioStream_getAllowedCapturePolicy(self.as_ptr()) })
     }
 
