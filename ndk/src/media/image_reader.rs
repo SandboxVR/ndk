@@ -174,7 +174,9 @@ impl ImageReader {
     pub fn get_window(&self) -> Result<NativeWindow> {
         unsafe {
             let ptr = construct_never_null(|res| ffi::AImageReader_getWindow(self.as_ptr(), res))?;
-            Ok(NativeWindow::from_ptr(ptr))
+            // NDK docs: the returned ANativeWindow is managed by AImageReader and must not be
+            // directly released. Acquire our own strong ref and release only that on Drop.
+            Ok(NativeWindow::clone_from_ptr(ptr))
         }
     }
 
