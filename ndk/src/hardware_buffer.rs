@@ -382,15 +382,18 @@ impl HardwareBuffer {
         })
     }
 
-    /// Receive a [`HardwareBuffer`] from an `AF_UNIX` socket.
+    /// Receive a [`HardwareBufferRef`] from an `AF_UNIX` socket.
     ///
     /// `AF_UNIX` sockets are wrapped by [`std::os::unix::net::UnixListener`] in Rust.
-    pub fn recv_handle_from_unix_socket(socket_fd: RawFd) -> Result<Self> {
+    ///
+    /// The native API returns an acquired reference; this wrapper therefore returns the owned
+    /// strong-reference type so the reference is released on [`Drop`].
+    pub fn recv_handle_from_unix_socket(socket_fd: RawFd) -> Result<HardwareBufferRef> {
         unsafe {
             let ptr =
                 construct(|res| ffi::AHardwareBuffer_recvHandleFromUnixSocket(socket_fd, res))?;
 
-            Ok(Self::from_ptr(NonNull::new_unchecked(ptr)))
+            Ok(HardwareBufferRef::from_ptr(NonNull::new_unchecked(ptr)))
         }
     }
 
