@@ -303,7 +303,11 @@ impl ForeignLooper {
             )
         } {
             1 => Ok(()),
-            -1 => Err(LooperError),
+            -1 => {
+                // `ALooper_addFd` did not take ownership of callback data on failure.
+                unsafe { drop(Box::from_raw(data as *mut F)) };
+                Err(LooperError)
+            }
             _ => unreachable!(),
         }
     }
