@@ -270,7 +270,7 @@ impl MediaCodec {
     }
 
     /// Returns [`None`] if timeout is reached.
-    pub fn dequeue_input_buffer(&self, timeout: Duration) -> Result<Option<InputBuffer>> {
+    pub fn dequeue_input_buffer(&self, timeout: Duration) -> Result<Option<InputBuffer<'_>>> {
         let result = unsafe {
             ffi::AMediaCodec_dequeueInputBuffer(
                 self.as_ptr(),
@@ -287,6 +287,7 @@ impl MediaCodec {
             Ok(Some(InputBuffer {
                 codec: self,
                 index: result as ffi::size_t,
+                queued: false,
             }))
         } else {
             NdkMediaError::from_status(ffi::media_status_t(result as _)).map(|()| None)
@@ -294,7 +295,7 @@ impl MediaCodec {
     }
 
     /// Returns [`None`] if timeout is reached.
-    pub fn dequeue_output_buffer(&self, timeout: Duration) -> Result<Option<OutputBuffer>> {
+    pub fn dequeue_output_buffer(&self, timeout: Duration) -> Result<Option<OutputBuffer<'_>>> {
         let mut info: ffi::AMediaCodecBufferInfo = unsafe { std::mem::zeroed() };
 
         let result = unsafe {
@@ -315,6 +316,7 @@ impl MediaCodec {
                 codec: self,
                 index: result as ffi::size_t,
                 info,
+                released: false,
             }))
         } else {
             NdkMediaError::from_status(ffi::media_status_t(result as _)).map(|()| None)
@@ -353,7 +355,7 @@ impl MediaCodec {
 
     pub fn queue_input_buffer(
         &self,
-        buffer: InputBuffer,
+        mut buffer: InputBuffer,
         offset: usize,
         size: usize,
         time: u64,
@@ -369,19 +371,27 @@ impl MediaCodec {
                 flags,
             )
         };
-        NdkMediaError::from_status(status)
+        let result = NdkMediaError::from_status(status);
+        if result.is_ok() {
+            buffer.queued = true;
+        }
+        result
     }
 
-    pub fn release_output_buffer(&self, buffer: OutputBuffer, render: bool) -> Result<()> {
+    pub fn release_output_buffer(&self, mut buffer: OutputBuffer, render: bool) -> Result<()> {
         let status = unsafe {
             ffi::AMediaCodec_releaseOutputBuffer(self.as_ptr(), buffer.index as ffi::size_t, render)
         };
-        NdkMediaError::from_status(status)
+        let result = NdkMediaError::from_status(status);
+        if result.is_ok() {
+            buffer.released = true;
+        }
+        result
     }
 
     pub fn release_output_buffer_at_time(
         &self,
-        buffer: OutputBuffer,
+        mut buffer: OutputBuffer,
         timestamp_ns: i64,
     ) -> Result<()> {
         let status = unsafe {
@@ -391,7 +401,11 @@ impl MediaCodec {
                 timestamp_ns,
             )
         };
-        NdkMediaError::from_status(status)
+        let result = NdkMediaError::from_status(status);
+        if result.is_ok() {
+            buffer.released = true;
+        }
+        result
     }
 
     #[cfg(feature = "api-level-26")]
@@ -441,6 +455,7 @@ impl Drop for MediaCodec {
 pub struct InputBuffer<'a> {
     codec: &'a MediaCodec,
     index: ffi::size_t,
+    queued: bool,
 }
 
 impl InputBuffer<'_> {
@@ -455,11 +470,22 @@ impl InputBuffer<'_> {
     }
 }
 
+impl Drop for InputBuffer<'_> {
+    fn drop(&mut self) {
+        if !self.queued {
+            let _ = unsafe {
+                ffi::AMediaCodec_queueInputBuffer(self.codec.as_ptr(), self.index, 0, 0, 0, 0)
+            };
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct OutputBuffer<'a> {
     codec: &'a MediaCodec,
     index: ffi::size_t,
     info: ffi::AMediaCodecBufferInfo,
+    released: bool,
 }
 
 impl OutputBuffer<'_> {
@@ -490,5 +516,19 @@ impl OutputBuffer<'_> {
 
     pub fn presentation_time_us(&self) -> i64 {
         self.info.presentationTimeUs
+    }
+}
+
+impl Drop for OutputBuffer<'_> {
+    fn drop(&mut self) {
+        if !self.released {
+            let _ = unsafe {
+                ffi::AMediaCodec_releaseOutputBuffer(
+                    self.codec.as_ptr(),
+                    self.index as ffi::size_t,
+                    false,
+                )
+            };
+        }
     }
 }
